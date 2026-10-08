@@ -19,3 +19,463 @@ button.sm{padding:5px 9px;font-size:12px}
 #file{position:absolute;opacity:0;width:1px;height:1px;overflow:hidden}
 #info{font-size:12px;color:var(--mut);width:100%}
 #view{flex:1;display:flex;align-items:center;justify-content:center;min-height:0;padding:8px;position:relative;overflow:hidden}
+#cv{max-width:100%;max-height:100%;border-radius:4px;box-shadow:0 4px 24px #0008}
+#empty{position:absolute;color:var(--mut);text-align:center;padding:20px;pointer-events:none}
+#side{display:flex;flex-direction:column;background:var(--panel);border-left:1px solid var(--line);min-height:0}
+@media (max-width:820px),(orientation:portrait){#side{border-left:0;border-top:1px solid var(--line)}}
+#hist{width:100%;height:50px;background:#0c0c0e;display:block;flex:none}
+#tabs{display:flex;overflow-x:auto;border-bottom:1px solid var(--line);flex:none}
+#tabs button{border:0;border-radius:0;background:none;color:var(--mut);padding:11px 13px;white-space:nowrap;border-bottom:2px solid transparent}
+#tabs button.on{color:var(--txt);border-bottom-color:var(--acc)}
+#panel{flex:1;overflow-y:auto;padding:10px 14px 30px}
+.row{margin:10px 0}
+.lab{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:var(--mut);margin-bottom:2px}
+.lab b{color:var(--txt);font-weight:500;min-width:44px;text-align:right}
+.lab span{flex:1}
+.lab i{font-style:normal;cursor:pointer;padding:0 8px;color:var(--mut)}
+input[type=range]{width:100%;height:30px;accent-color:var(--acc)}
+input[type=text]{width:100%;padding:10px;border-radius:8px;border:1px solid var(--line);background:#101013;color:var(--txt);font-size:14px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 12px}
+.chip{width:34px;height:34px;border-radius:50%;border:3px solid transparent;padding:0}
+.chip.on{border-color:#fff}
+.item{display:flex;align-items:center;gap:10px;background:#16161a;border:1px solid var(--line);border-radius:10px;padding:8px;margin:8px 0}
+.item img{width:56px;height:56px;object-fit:cover;border-radius:6px;background:#000}
+.item .nm{flex:1;font-size:14px;word-break:break-word}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.wrap{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+h4{margin:16px 0 4px;font-size:12px;letter-spacing:.08em;color:var(--mut);text-transform:uppercase}
+.note{font-size:12px;color:var(--mut);line-height:1.5}
+#cc{width:100%;max-width:380px;aspect-ratio:1/1;display:block;margin:8px auto;border-radius:8px;touch-action:none;user-select:none;-webkit-user-select:none}
+.chs button.on{outline:2px solid #fff}
+#busy{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:99;font-size:16px;text-align:center;padding:20px}
+#busy[hidden]{display:none}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <div id="bar">
+      <label class="btn pri" for="file">📂 Buka Foto</label>
+      <input id="file" type="file" accept="image/*">
+      <button id="cmp">👁 Tahan: Asli</button>
+      <button id="reset">↺ Reset</button>
+      <button id="exp" class="pri">⬇ Simpan JPG</button>
+      <button id="expPng">PNG</button>
+      <select id="pq" title="Kualitas preview di layar (hasil ekspor selalu ukuran asli)">
+        <option value="1000">Preview: Cepat</option>
+        <option value="1500" selected>Preview: Sedang</option>
+        <option value="2200">Preview: Tinggi</option>
+      </select>
+      <div id="info">Belum ada foto</div>
+    </div>
+    <div id="view">
+      <div id="empty">Buka foto dari galeri tablet untuk mulai mengedit</div>
+      <canvas id="cv" width="10" height="10" hidden></canvas>
+    </div>
+  </div>
+  <div id="side">
+    <canvas id="hist" width="340" height="50"></canvas>
+    <div id="tabs"></div>
+    <div id="panel"></div>
+  </div>
+</div>
+<div id="busy" hidden><div id="busyTxt">Memproses...</div></div>
+
+<script>
+/* ============ DATA & STATE ============ */
+const COLORS=[['Merah',0,'#e53935'],['Oranye',30,'#fb8c00'],['Kuning',60,'#fdd835'],['Hijau',120,'#43a047'],['Aqua',180,'#00acc1'],['Biru',240,'#1e88e5'],['Ungu',280,'#8e24aa'],['Magenta',320,'#d81b60']];
+const DEF={exposure:0,contrast:0,highlights:0,shadows:0,whites:0,blacks:0,temp:0,tint:0,vibrance:0,saturation:0,shH:210,shS:0,hiH:40,hiS:0,balance:0,vignette:0,grain:0,
+ curves:{m:[[0,0],[1,1]],r:[[0,0],[1,1]],g:[[0,0],[1,1]],b:[[0,0],[1,1]]}};
+COLORS.forEach((c,i)=>{DEF['h'+i]=0;DEF['s'+i]=0;DEF['l'+i]=0});
+const clone=o=>JSON.parse(JSON.stringify(o));
+function mk(over){const p=clone(DEF);if(over){const o=clone(over);if(o.curves){Object.assign(p.curves,o.curves);delete o.curves}Object.assign(p,o)}return p}
+let P=mk();
+const TABS=[['light','Cahaya'],['curve','Kurva'],['color','Warna'],['hsl','HSL'],['grade','Grading'],['fx','Efek'],['presets','Preset'],['gallery','Galeri']];
+const SL={
+ light:[['exposure','Exposure',-5,5,.05],['contrast','Kontras',-100,100,1],['highlights','Highlights',-100,100,1],['shadows','Shadows',-100,100,1],['whites','Whites',-100,100,1],['blacks','Blacks',-100,100,1]],
+ color:[['temp','Temperatur',-100,100,1],['tint','Tint',-100,100,1],['vibrance','Vibrance',-100,100,1],['saturation','Saturasi',-100,100,1]],
+ grade:[['shH','Shadows - Hue',0,360,1],['shS','Shadows - Saturasi',0,100,1],['hiH','Highlights - Hue',0,360,1],['hiS','Highlights - Saturasi',0,100,1],['balance','Balance',-100,100,1]],
+ fx:[['vignette','Vinyet',-100,100,1],['grain','Grain',0,100,1]]
+};
+const BUILTIN=[
+ ['Teal & Orange',{contrast:10,saturation:10,shH:195,shS:45,hiH:30,hiS:40,curves:{m:[[0,0],[.25,.2],[.75,.8],[1,1]]}}],
+ ['Hangat Golden',{temp:30,tint:6,exposure:.1,highlights:-20,vibrance:25,hiH:38,hiS:25}],
+ ['Dingin Moody',{temp:-28,contrast:18,shadows:-15,saturation:-12,shH:215,shS:35,vignette:-30}],
+ ['Matte Fade',{saturation:-10,highlights:-10,curves:{m:[[0,.09],[.25,.28],[.75,.78],[1,.94]]}}],
+ ['Vintage',{temp:18,saturation:-18,grain:35,vignette:-25,hiH:45,hiS:20,shH:170,shS:15,curves:{m:[[0,.07],[.5,.5],[1,.95]],b:[[0,.06],[1,.92]]}}],
+ ['Hitam Putih',{saturation:-100,vibrance:-100,grain:15,curves:{m:[[0,0],[.25,.18],[.75,.84],[1,1]]}}],
+ ['Cerah Bersih',{exposure:.25,shadows:35,whites:20,vibrance:30}]
+];
+const CURVE_PRESETS=[
+ ['Linear',[[0,0],[1,1]]],
+ ['S lembut',[[0,0],[.25,.2],[.75,.8],[1,1]]],
+ ['S kuat',[[0,0],[.25,.14],[.75,.86],[1,1]]],
+ ['Matte',[[0,.09],[.25,.28],[.75,.78],[1,.94]]],
+ ['Terangkan',[[0,0],[.5,.62],[1,1]]],
+ ['Gelapkan',[[0,0],[.5,.4],[1,1]]]
+];
+const CH=[['m','RGB','#dddddd'],['r','Merah','#ee5555'],['g','Hijau','#55cc55'],['b','Biru','#5588ff']];
+let curTab='light',selC=0,curCh='m',selPt=-1,img=null,blobCur=null,curId=null,urlCur=null,srcData=null,outData=null,pw=0,ph=0,showOrig=false,UIREF={};
+const $=s=>document.querySelector(s);
+const cv=$('#cv'),ctx=cv.getContext('2d',{willReadFrequently:true});
+const fmt=v=>(Math.abs(v)<10&&v%1!==0)?v.toFixed(2):Math.round(v);
+
+/* ============ DATABASE (IndexedDB) ============ */
+let db=null;
+function openDB(){return new Promise((res,rej)=>{if(!window.indexedDB)return rej(new Error('IndexedDB tidak didukung'));
+ const r=indexedDB.open('fotograder',1);
+ r.onupgradeneeded=()=>{const d=r.result;d.createObjectStore('presets',{keyPath:'id',autoIncrement:true});d.createObjectStore('projects',{keyPath:'id',autoIncrement:true})};
+ r.onsuccess=()=>{db=r.result;res()};r.onerror=()=>rej(r.error)})}
+function tx(store,mode,fn){return new Promise((res,rej)=>{if(!db)return rej(new Error('Database tidak tersedia'));
+ const t=db.transaction(store,mode);const rq=fn(t.objectStore(store));t.oncomplete=()=>res(rq&&rq.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)})}
+const dbAll=s=>tx(s,'readonly',o=>o.getAll());
+const dbPut=(s,v)=>tx(s,'readwrite',o=>o.put(v));
+const dbDel=(s,id)=>tx(s,'readwrite',o=>o.delete(id));
+async function safeAll(s){try{return await dbAll(s)}catch(e){return null}}
+
+/* ============ CURVE MATH (monotone cubic) ============ */
+const N=1024,IDENT=[[0,0],[1,1]];
+const isIdent=a=>a.length===2&&a[0][0]===0&&a[0][1]===0&&a[1][0]===1&&a[1][1]===1;
+function buildLUT(pts,n){
+ n=n||N;const lut=new Float32Array(n),k=pts.length;
+ if(k<2){for(let i=0;i<n;i++)lut[i]=i/(n-1);return lut}
+ const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),s=[],t=[];
+ for(let i=0;i<k-1;i++)s[i]=(ys[i+1]-ys[i])/Math.max(1e-6,xs[i+1]-xs[i]);
+ t[0]=s[0];t[k-1]=s[k-2];
+ for(let i=1;i<k-1;i++)t[i]=(s[i-1]*s[i]<=0)?0:(s[i-1]+s[i])/2;
+ for(let i=0;i<k-1;i++){
+  if(s[i]===0){t[i]=0;t[i+1]=0}
+  else{const a=t[i]/s[i],b=t[i+1]/s[i],h=a*a+b*b;if(h>9){const tau=3/Math.sqrt(h);t[i]=tau*a*s[i];t[i+1]=tau*b*s[i]}}
+ }
+ let seg=0;
+ for(let i=0;i<n;i++){
+  const x=i/(n-1);let y;
+  if(x<=xs[0])y=ys[0];
+  else if(x>=xs[k-1])y=ys[k-1];
+  else{
+   while(seg<k-2&&x>xs[seg+1])seg++;
+   const h=xs[seg+1]-xs[seg],u=(x-xs[seg])/h,u2=u*u,u3=u2*u;
+   y=(2*u3-3*u2+1)*ys[seg]+(u3-2*u2+u)*h*t[seg]+(-2*u3+3*u2)*ys[seg+1]+(u3-u2)*h*t[seg+1];
+  }
+  lut[i]=y<0?0:y>1?1:y;
+ }
+ return lut;
+}
+
+/* ============ PIXEL ENGINE ============ */
+const ss=(a,b,x)=>{x=(x-a)/(b-a);x=x<0?0:x>1?1:x;return x*x*(3-2*x)};
+const cl=v=>v<0?0:v>1?1:v;
+const T3=[0,0,0];
+function hue2(p,q,t){if(t<0)t+=1;if(t>1)t-=1;if(t<1/6)return p+(q-p)*6*t;if(t<.5)return q;if(t<2/3)return p+(q-p)*(2/3-t)*6;return p}
+function hsl2rgb(h,s,l,o){if(s===0){o[0]=o[1]=o[2]=l;return o}
+ const q=l<.5?l*(1+s):l+s-l*s,p=2*l-q;o[0]=hue2(p,q,h+1/3);o[1]=hue2(p,q,h);o[2]=hue2(p,q,h-1/3);return o}
+const CEN=COLORS.map(c=>c[1]);
+
+function prepare(p){
+ const q={};
+ const ex=Math.pow(2,p.exposure),t=p.temp/100,ti=p.tint/100;
+ q.rm=ex*(1+t*.25+ti*.08);q.gm=ex*(1-ti*.2);q.bm=ex*(1-t*.25+ti*.08);
+ q.k=1+p.contrast/100;q.hl=p.highlights/100*.35;q.sh=p.shadows/100*.35;q.wh=p.whites/100*.25;q.bl=p.blacks/100*.25;
+ q.HH=[];q.SS=[];q.LL=[];q.hslOn=false;
+ for(let j=0;j<8;j++){q.HH[j]=p['h'+j]||0;q.SS[j]=p['s'+j]||0;q.LL[j]=p['l'+j]||0;if(q.HH[j]||q.SS[j]||q.LL[j])q.hslOn=true}
+ q.sat=p.saturation/100;q.vib=p.vibrance/100;q.colorOn=q.hslOn||!!q.sat||!!q.vib;
+ q.gOn=p.shS>0||p.hiS>0;
+ q.shC=hsl2rgb(p.shH/360,1,.5,[0,0,0]);q.hiC=hsl2rgb(p.hiH/360,1,.5,[0,0,0]);
+ q.shA=p.shS/100*.5;q.hiA=p.hiS/100*.5;q.piv=.5+p.balance/200;
+ q.vg=p.vignette/100;q.gr=p.grain/100*.3;
+ const cc=p.curves||{};
+ const ch=['m','r','g','b'].map(k=>(cc[k]&&cc[k].length>=2)?cc[k]:IDENT);
+ q.cOn=ch.some(a=>!isIdent(a));
+ if(q.cOn){
+  const M=buildLUT(ch[0]),R=buildLUT(ch[1]),G=buildLUT(ch[2]),B=buildLUT(ch[3]);
+  q.LR=new Float32Array(N);q.LG=new Float32Array(N);q.LB=new Float32Array(N);
+  for(let i=0;i<N;i++){const m=(M[i]*(N-1)+.5)|0;q.LR[i]=R[m];q.LG[i]=G[m];q.LB[i]=B[m]}
+ }
+ return q;
+}
+
+/* render baris y0..y0+rows dari gambar penuh fw x fh (src & dst boleh sama) */
+function render(src,dst,q,w,rows,y0,fw,fh){
+ const d=src.data,o=dst.data;
+ const {rm,gm,bm,k,hl,sh,wh,bl,HH,SS,LL,hslOn,sat,vib,colorOn,gOn,shC,hiC,shA,hiA,piv,vg,gr,cOn,LR,LG,LB}=q;
+ const cx=fw/2,cy=fh/2,maxd=Math.sqrt(cx*cx+cy*cy);
+ const tone=hl||sh||wh||bl;
+ let idx=0;
+ for(let yy=0;yy<rows;yy++){
+  const dy=yy+y0-cy;
+  for(let x=0;x<w;x++,idx+=4){
+   let r=d[idx]/255*rm,g=d[idx+1]/255*gm,b=d[idx+2]/255*bm;
+   r=cl((r-.5)*k+.5);g=cl((g-.5)*k+.5);b=cl((b-.5)*k+.5);
+   let L=.2126*r+.7152*g+.0722*b;
+   if(tone){
+    const a=sh*(1-ss(0,.5,L))+hl*ss(.5,1,L)+wh*ss(.7,1,L)+bl*(1-ss(0,.3,L));
+    r=cl(r+a);g=cl(g+a);b=cl(b+a);
+   }
+   if(cOn){r=LR[(r*(N-1)+.5)|0];g=LG[(g*(N-1)+.5)|0];b=LB[(b*(N-1)+.5)|0]}
+   if(colorOn){
+    const mx=Math.max(r,g,b),mn=Math.min(r,g,b);let l=(mx+mn)/2,s=0,hh=0;
+    if(mx!==mn){const dd=mx-mn;s=l>.5?dd/(2-mx-mn):dd/(mx+mn);
+     if(mx===r)hh=(g-b)/dd+(g<b?6:0);else if(mx===g)hh=(b-r)/dd+2;else hh=(r-g)/dd+4;hh*=60}
+    if(hslOn&&s>0){let dh=0,ds=0,dl=0;
+     for(let j=0;j<8;j++){let dist=Math.abs(hh-CEN[j]);if(dist>180)dist=360-dist;const wg=1-dist/45;
+      if(wg>0){dh+=wg*HH[j]*.45;ds+=wg*SS[j]/100;dl+=wg*LL[j]/100*.5}}
+     hh=(hh+dh+360)%360;s*=1+ds;l+=dl*s}
+    if(s>0){s*=1+sat;s*=1+vib*(1-s)}
+    s=cl(s);l=cl(l);
+    if(s===0){r=g=b=l}else{hsl2rgb(hh/360,s,l,T3);r=T3[0];g=T3[1];b=T3[2]}
+   }
+   if(gOn){
+    L=.2126*r+.7152*g+.0722*b;
+    const ws=1-ss(.05,piv+.15,L),wh2=ss(piv-.15,.95,L);
+    r=cl(r+(shC[0]-.5)*shA*ws+(hiC[0]-.5)*hiA*wh2);
+    g=cl(g+(shC[1]-.5)*shA*ws+(hiC[1]-.5)*hiA*wh2);
+    b=cl(b+(shC[2]-.5)*shA*ws+(hiC[2]-.5)*hiA*wh2);
+   }
+   if(vg){const dx=x-cx;const m=1+vg*ss(.35,1,Math.sqrt(dx*dx+dy*dy)/maxd);r*=m;g*=m;b*=m}
+   if(gr){const n=(Math.random()-.5)*gr;r+=n;g+=n;b+=n}
+   o[idx]=cl(r)*255;o[idx+1]=cl(g)*255;o[idx+2]=cl(b)*255;o[idx+3]=255;
+  }
+ }
+}
+
+/* ============ DRAW ============ */
+let pending=false;
+function schedule(){if(pending)return;pending=true;requestAnimationFrame(()=>{pending=false;draw()})}
+function draw(){
+ if(!srcData)return;
+ if(showOrig){ctx.putImageData(srcData,0,0);return}
+ render(srcData,outData,prepare(P),pw,ph,0,pw,ph);ctx.putImageData(outData,0,0);drawHist();
+}
+function drawHist(){
+ const hc=$('#hist'),hx=hc.getContext('2d'),W=hc.width,H=hc.height;
+ const bins=[new Array(64).fill(0),new Array(64).fill(0),new Array(64).fill(0)];
+ const d=outData.data;
+ for(let i=0;i<d.length;i+=16){bins[0][d[i]>>2]++;bins[1][d[i+1]>>2]++;bins[2][d[i+2]>>2]++}
+ const mx=Math.max(...bins[0],...bins[1],...bins[2])||1;
+ hx.clearRect(0,0,W,H);hx.globalCompositeOperation='lighter';
+ const cols=['#c22','#2c2','#26d'];
+ bins.forEach((bn,c)=>{hx.fillStyle=cols[c];bn.forEach((v,i)=>{const bh=v/mx*H;hx.fillRect(i*W/64,H-bh,W/64+.5,bh)})});
+ hx.globalCompositeOperation='source-over';
+}
+
+/* ============ LOAD IMAGE ============ */
+function setupPreview(){
+ const mx=+$('#pq').value;
+ const sc=Math.min(1,mx/Math.max(img.naturalWidth,img.naturalHeight));
+ pw=Math.round(img.naturalWidth*sc);ph=Math.round(img.naturalHeight*sc);
+ cv.width=pw;cv.height=ph;ctx.drawImage(img,0,0,pw,ph);
+ srcData=ctx.getImageData(0,0,pw,ph);outData=ctx.createImageData(pw,ph);
+ cv.hidden=false;$('#empty').hidden=true;draw();
+}
+$('#pq').onchange=()=>{if(img)setupPreview()};
+function loadBlob(blob){
+ return new Promise(res=>{
+  if(urlCur)URL.revokeObjectURL(urlCur);
+  urlCur=URL.createObjectURL(blob);blobCur=blob;
+  const im=new Image();
+  im.onload=()=>{img=im;
+   const w=im.naturalWidth,h=im.naturalHeight;
+   $('#info').textContent=`Foto asli: ${w} × ${h} px (${(w*h/1e6).toFixed(1)} MP) · ekspor memakai ukuran asli, tanpa pengecilan`;
+   setupPreview();res()};
+  im.onerror=()=>{alert('Foto tidak bisa dibuka');res()};
+  im.src=urlCur;
+ });
+}
+$('#file').onchange=async e=>{const f=e.target.files[0];if(!f)return;curId=null;P=mk();selPt=-1;await loadBlob(f);showTab(curTab);e.target.value=''};
+
+/* ============ EXPORT (ukuran asli, diproses per potongan) ============ */
+const busy=t=>{$('#busy').hidden=!t;if(t)$('#busyTxt').textContent=t};
+async function exportImg(type){
+ if(!img)return alert('Buka foto dulu');
+ const W=img.naturalWidth,H=img.naturalHeight;
+ try{
+  busy('Menyiapkan foto ukuran asli...');
+  await new Promise(r=>setTimeout(r,30));
+  const c=document.createElement('canvas');c.width=W;c.height=H;
+  const x=c.getContext('2d',{willReadFrequently:true});
+  x.drawImage(img,0,0);
+  const q=prepare(P);
+  const rowsPer=Math.max(1,Math.floor(2000000/W));
+  for(let y0=0;y0<H;y0+=rowsPer){
+   const rows=Math.min(rowsPer,H-y0);
+   const s=x.getImageData(0,y0,W,rows);
+   render(s,s,q,W,rows,y0,W,H);
+   x.putImageData(s,0,y0);
+   busy('Memproses '+Math.round((y0+rows)/H*100)+'%');
+   await new Promise(r=>setTimeout(r,0));
+  }
+  busy('Menyimpan file...');
+  const blob=await new Promise(r=>c.toBlob(r,type,.98));
+  if(!blob)throw new Error('Gagal membuat file');
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+  a.download='foto-grader-'+Date.now()+(type==='image/png'?'.png':'.jpg');
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),60000);
+ }catch(err){
+  alert('Ekspor gagal (kemungkinan memori tablet kurang untuk foto sebesar '+W+'×'+H+'). Coba tutup tab lain lalu ulangi.\n'+err.message);
+ }finally{busy(null)}
+}
+$('#exp').onclick=()=>exportImg('image/jpeg');
+$('#expPng').onclick=()=>exportImg('image/png');
+$('#reset').onclick=()=>{P=mk();selPt=-1;showTab(curTab);schedule()};
+const cmp=$('#cmp');
+cmp.addEventListener('pointerdown',e=>{e.preventDefault();showOrig=true;draw()});
+['pointerup','pointerleave','pointercancel'].forEach(ev=>cmp.addEventListener(ev,()=>{if(showOrig){showOrig=false;draw()}}));
+cmp.addEventListener('contextmenu',e=>e.preventDefault());
+
+/* ============ UI ============ */
+function el(tag,cls,html){const e=document.createElement(tag);if(cls)e.className=cls;if(html!==undefined)e.innerHTML=html;return e}
+function slider(key,label,min,max,step){
+ const row=el('div','row');
+ row.innerHTML=`<div class="lab"><span>${label}</span><b></b><i title="Reset">↺</i></div><input type="range" min="${min}" max="${max}" step="${step}">`;
+ const inp=row.querySelector('input'),val=row.querySelector('b');
+ const set=v=>{inp.value=v;val.textContent=fmt(+v)};
+ set(P[key]);UIREF[key]=set;
+ inp.oninput=()=>{
+  P[key]=+inp.value;val.textContent=fmt(P[key]);
+  if(key==='shH'&&P.shS===0){P.shS=40;UIREF.shS&&UIREF.shS(40)}
+  if(key==='hiH'&&P.hiS===0){P.hiS=40;UIREF.hiS&&UIREF.hiS(40)}
+  schedule();
+ };
+ row.querySelector('i').onclick=()=>{P[key]=DEF[key];set(DEF[key]);schedule()};
+ return row;
+}
+function buildTabs(){
+ const t=$('#tabs');t.innerHTML='';
+ TABS.forEach(([k,n])=>{const b=el('button',k===curTab?'on':'',n);b.onclick=()=>showTab(k);t.appendChild(b)});
+}
+function showTab(k){
+ curTab=k;buildTabs();UIREF={};const pn=$('#panel');pn.innerHTML='';
+ if(SL[k]){SL[k].forEach(a=>pn.appendChild(slider(...a)));
+  if(k==='grade')pn.appendChild(el('p','note','Beri warna pada bayangan dan terang. Menggeser Hue otomatis menaikkan Saturasi supaya warnanya terlihat.'))}
+ else if(k==='hsl'){
+  const ch=el('div','chips');
+  COLORS.forEach((c,i)=>{const b=el('button','chip'+(i===selC?' on':''));b.style.background=c[2];b.title=c[0];b.onclick=()=>{selC=i;showTab('hsl')};ch.appendChild(b)});
+  pn.appendChild(ch);pn.appendChild(el('h4','',COLORS[selC][0]));
+  pn.appendChild(slider('h'+selC,'Hue',-100,100,1));
+  pn.appendChild(slider('s'+selC,'Saturasi',-100,100,1));
+  pn.appendChild(slider('l'+selC,'Luminance',-100,100,1));
+ }
+ else if(k==='curve')buildCurve(pn);
+ else if(k==='presets')buildPresets(pn);
+ else if(k==='gallery')buildGallery(pn);
+}
+
+/* ---- Kurva nada (Tone Curve) ---- */
+function buildCurve(pn){
+ const chs=el('div','wrap chs');
+ CH.forEach(([k,n,col])=>{const b=el('button','sm'+(k===curCh?' on':''),n);b.style.borderColor=col;b.style.color=col;b.onclick=()=>{curCh=k;selPt=-1;showTab('curve')};chs.appendChild(b)});
+ pn.appendChild(chs);
+ const c=el('canvas');c.id='cc';c.width=640;c.height=640;pn.appendChild(c);
+ pn.appendChild(el('p','note','Ketuk garis untuk menambah titik · seret untuk mengubah · ketuk 2x pada titik untuk menghapus. Titik ujung hanya bisa digeser naik/turun (angkat blacks atau turunkan whites).'));
+ pn.appendChild(el('h4','','Preset kurva (RGB)'));
+ const w=el('div','wrap');
+ CURVE_PRESETS.forEach(([n,a])=>{const b=el('button','sm',n);b.onclick=()=>{P.curves.m=clone(a);if(curCh==='m')selPt=-1;drawCurve();schedule()};w.appendChild(b)});
+ pn.appendChild(w);
+ const w2=el('div','wrap');
+ const r1=el('button','sm','↺ Reset kanal ini');r1.onclick=()=>{P.curves[curCh]=clone(IDENT);selPt=-1;drawCurve();schedule()};
+ const r2=el('button','sm','↺ Reset semua kurva');r2.onclick=()=>{P.curves=clone(DEF.curves);selPt=-1;drawCurve();schedule()};
+ w2.append(r1,r2);pn.appendChild(w2);
+ curveEvents(c);drawCurve();
+}
+function drawCurve(){
+ const c=$('#cc');if(!c)return;const g=c.getContext('2d'),S=c.width;
+ g.fillStyle='#0c0c0e';g.fillRect(0,0,S,S);
+ g.strokeStyle='#2a2a32';g.lineWidth=1;
+ for(let i=1;i<4;i++){g.beginPath();g.moveTo(i*S/4,0);g.lineTo(i*S/4,S);g.moveTo(0,i*S/4);g.lineTo(S,i*S/4);g.stroke()}
+ g.strokeStyle='#3a3a44';g.beginPath();g.moveTo(0,S);g.lineTo(S,0);g.stroke();
+ CH.forEach(([k,,col])=>{
+  const pts=P.curves[k];if(k!==curCh&&isIdent(pts))return;
+  const lut=buildLUT(pts,256);
+  g.strokeStyle=col;g.globalAlpha=k===curCh?1:.35;g.lineWidth=k===curCh?4:3;g.beginPath();
+  for(let i=0;i<256;i++){const x=i/255*S,y=(1-lut[i])*S;i?g.lineTo(x,y):g.moveTo(x,y)}
+  g.stroke();
+ });
+ g.globalAlpha=1;
+ const col=CH.find(a=>a[0]===curCh)[2];
+ P.curves[curCh].forEach((p,i)=>{g.beginPath();g.arc(p[0]*S,(1-p[1])*S,i===selPt?15:11,0,7);g.fillStyle=i===selPt?'#fff':col;g.fill();g.strokeStyle='#000';g.lineWidth=3;g.stroke()});
+}
+function curveEvents(c){
+ let drag=false,lastT=0,lastI=-2;
+ const pos=e=>{const r=c.getBoundingClientRect();return[(e.clientX-r.left)/r.width,1-(e.clientY-r.top)/r.height]};
+ c.onpointerdown=e=>{
+  e.preventDefault();c.setPointerCapture(e.pointerId);
+  const [x,y]=pos(e);const pts=P.curves[curCh];
+  let best=-1,bd=.08;
+  pts.forEach((p,i)=>{const dd=Math.hypot(p[0]-x,p[1]-y);if(dd<bd){bd=dd;best=i}});
+  const now=Date.now();
+  if(best>=0){
+   if(best>0&&best<pts.length-1&&lastI===best&&now-lastT<350){pts.splice(best,1);selPt=-1;lastI=-2;drag=false;schedule();drawCurve();return}
+   selPt=best;
+  }else{
+   const nx=Math.min(.98,Math.max(.02,x));
+   if(pts.some(p=>Math.abs(p[0]-nx)<.03))return;
+   pts.push([nx,Math.min(1,Math.max(0,y))]);pts.sort((a,b)=>a[0]-b[0]);
+   selPt=pts.findIndex(p=>p[0]===nx);
+  }
+  lastT=now;lastI=selPt;drag=true;schedule();drawCurve();
+ };
+ c.onpointermove=e=>{
+  if(!drag||selPt<0)return;
+  const [x,y]=pos(e);const pts=P.curves[curCh];const p=pts[selPt];
+  p[1]=Math.min(1,Math.max(0,y));
+  if(selPt>0&&selPt<pts.length-1)p[0]=Math.min(pts[selPt+1][0]-.02,Math.max(pts[selPt-1][0]+.02,x));
+  schedule();drawCurve();
+ };
+ c.onpointerup=c.onpointercancel=()=>{drag=false};
+}
+
+/* ---- Preset ---- */
+async function buildPresets(pn){
+ pn.appendChild(el('h4','','Bawaan'));
+ const g=el('div','grid');
+ BUILTIN.forEach(([n,p])=>{const b=el('button','',n);b.onclick=()=>{P=mk(p);selPt=-1;schedule();showTab('presets')};g.appendChild(b)});
+ pn.appendChild(g);
+ pn.appendChild(el('h4','','Preset saya (tersimpan di database)'));
+ const inp=el('input');inp.type='text';inp.placeholder='Nama preset baru';pn.appendChild(inp);
+ const sv=el('button','pri','💾 Simpan pengaturan sebagai preset');sv.style.cssText='width:100%;margin-top:8px';
+ sv.onclick=async()=>{const n=inp.value.trim();if(!n)return alert('Isi nama preset');
+  try{await dbPut('presets',{name:n,params:clone(P),created:Date.now()});showTab('presets')}catch(e){alert('Database tidak tersedia: '+e.message)}};
+ pn.appendChild(sv);
+ const list=await safeAll('presets');
+ if(list===null){pn.appendChild(el('p','note','Database tidak tersedia di browser ini (mode privat?).'));return}
+ if(!list.length)pn.appendChild(el('p','note','Belum ada preset tersimpan.'));
+ list.reverse().forEach(it=>{
+  const r=el('div','item');const nm=el('div','nm');nm.textContent=it.name;
+  const a=el('button','sm pri','Pakai'),d=el('button','sm','Hapus');
+  a.onclick=()=>{P=mk(it.params);selPt=-1;schedule()};
+  d.onclick=async()=>{if(confirm('Hapus preset ini?')){await dbDel('presets',it.id);showTab('presets')}};
+  r.append(nm,a,d);pn.appendChild(r)});
+}
+
+/* ---- Galeri proyek ---- */
+async function buildGallery(pn){
+ pn.appendChild(el('p','note','Proyek menyimpan foto asli + semua pengaturan edit (termasuk kurva) ke database di browser (IndexedDB), jadi bisa dibuka & diedit lagi nanti.'));
+ const inp=el('input');inp.type='text';inp.placeholder='Nama proyek';pn.appendChild(inp);
+ const sv=el('button','pri','💾 Simpan proyek');sv.style.cssText='width:100%;margin-top:8px';
+ sv.onclick=async()=>{
+  if(!img)return alert('Buka foto dulu');
+  const n=inp.value.trim()||('Proyek '+new Date().toLocaleString('id-ID'));
+  const c=document.createElement('canvas');const sc=200/Math.max(pw,ph);c.width=Math.round(pw*sc);c.height=Math.round(ph*sc);
+  const t=document.createElement('canvas');t.width=pw;t.height=ph;t.getContext('2d').putImageData(outData,0,0);
+  c.getContext('2d').drawImage(t,0,0,c.width,c.height);
+  const rec={name:n,blob:blobCur,params:clone(P),thumb:c.toDataURL('image/jpeg',.7),created:Date.now()};
+  if(curId)rec.id=curId;
+  try{curId=await dbPut('projects',rec);showTab('gallery')}catch(e){alert('Gagal menyimpan: '+e.message)}};
+ pn.appendChild(sv);
+ const list=await safeAll('projects');
+ if(list===null){pn.appendChild(el('p','note','Database tidak tersedia di browser ini (mode privat?).'));return}
+ if(!list.length)pn.appendChild(el('p','note','Belum ada proyek.'));
+ list.reverse().forEach(it=>{
+  const r=el('div','item');const im=el('img');im.src=it.thumb;
+  const nm=el('div','nm');nm.textContent=it.name;
+  const a=el('button','sm pri','Buka'),d=el('button','sm','Hapus');
+  a.onclick=async()=>{curId=it.id;await loadBlob(it.blob);P=mk(it.params);selPt=-1;schedule();showTab('light')};
+  d.onclick=async()=>{if(confirm('Hapus proyek ini?')){await dbDel('projects',it.id);if(curId===it.id)curId=null;showTab('gallery')}};
+  r.append(im,nm,a,d);pn.appendChild(r)});
+}
+showTab('light');
+openDB().then(()=>{if(curTab==='presets'||curTab==='gallery')showTab(curTab)}).catch(e=>console.error(e));
+</script>
+</body>
+</html>
